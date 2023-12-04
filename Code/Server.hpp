@@ -7,6 +7,8 @@
 #include <cassert>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/epoll.h>
+#include <functional>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
@@ -186,7 +188,7 @@ public:
     ~Socket() { Close(); }
 
 public:
-    int GetFd() {return _sockfd;}
+    int GetFd() { return _sockfd; }
 
     bool Create() // 创建套接字
     {
@@ -310,20 +312,20 @@ public:
     }
 
     // 开启地址重用
-    void ReuseAddress() 
+    void ReuseAddress()
     {
         // int setsockopt(int socket, int level, int option_name, const void *option_value, socklen_t option_len);
         int opt = 1;
-        setsockopt(_sockfd, SOL_SOCKET, SO_REUSEADDR, (void*)&opt, sizeof(int)); // 设置套接字
+        setsockopt(_sockfd, SOL_SOCKET, SO_REUSEADDR, (void *)&opt, sizeof(int)); // 设置套接字
         opt = 1;
-        setsockopt(_sockfd, SOL_SOCKET, SO_REUSEPORT, (void*)&opt, sizeof(int)); // 设置端口
+        setsockopt(_sockfd, SOL_SOCKET, SO_REUSEPORT, (void *)&opt, sizeof(int)); // 设置端口
     }
 
     // 设置非阻塞
     void NonBlock()
     {
         // int fcntl(int fildes, int cmd, ...);
-        int flag = fcntl(_sockfd, F_GETFL, 0); // 先获取原属性
+        int flag = fcntl(_sockfd, F_GETFL, 0);      // 先获取原属性
         fcntl(_sockfd, F_SETFL, flag | O_NONBLOCK); // 在设置新属性并原属性
     }
 
@@ -339,7 +341,8 @@ public:
         if (!Listen())
             return false;
         // 设置非阻塞
-        if(block_flag) NonBlock();
+        if (block_flag)
+            NonBlock();
         // 启动地址重用
         ReuseAddress();
 
@@ -358,4 +361,145 @@ public:
         return true;
     }
 };
+
+using EventCallBack = std::function<void()>;
+class Channel
+{
+private:
+    int _fd;
+    uint32_t _events;          // 当前需要监控的事件
+    uint32_t _revents;         // 当前连接触发的事件
+    EventCallBack _read_call;  // 可读事件被触发回调函数
+    EventCallBack _write_call; // 可写事件被触发回调函数
+    EventCallBack _error_call; // 错误事件被触发回调函数
+    EventCallBack _close_call; // 连接断开事件被触发回调函数
+    EventCallBack _event_call; // 任意事件被触发回调函数
+
+public:
+    Channel(int fd) : _fd(fd) {}
+    int GetFd() { return _fd; }
+
+public:
+    void SetREvents(uint32_t events)
+    {
+        _revents = events;
+    }
+
+    /* 设置各个回调函数 */
+    void SetReadCallBack(const EventCallBack &cb)
+    {
+        _read_call = cb;
+    }
+    void SetWriteCallBack(const EventCallBack &cb)
+    {
+        _write_call = cb;
+    }
+    void SetErrorCallBack(const EventCallBack &cb)
+    {
+        _error_call = cb;
+    }
+    void SetCloseCallBack(const EventCallBack &cb)
+    {
+        _close_call = cb;
+    }
+    void SetEventCallBack(const EventCallBack &cb)
+    {
+        _event_call = cb;
+    }
+
+    // 判断当前是否可读
+    bool ReadAble()
+    {
+        return (_events & EPOLLIN);
+    }
+
+    // 判断当前是否可写
+    bool WritrAble()
+    {
+        return (_events & EPOLLOUT);
+    }
+
+    // 启动可读事件监控
+    void EnableRead()
+    {
+        _events |= EPOLLIN;
+        /* 与EventLoop相关联，为EventLoop添加事件监控提供接口 */
+    }
+
+    // 启动可写事件监控
+    void EnableWrite()
+    {
+        _events |= EPOLLOUT;
+        /* 与EventLoop相关联，为EventLoop添加事件监控提供接口 */
+    }
+
+    // 关闭可读事件监控
+    void DisableRead()
+    {
+        _events &= ~EPOLLIN;
+        /* 与EventLoop相关联，为EventLoop修改事件监控提供接口 */
+    }
+
+    // 关闭可写事件监控
+    void DisableWrite()
+    {
+        _events &= ~EPOLLOUT;
+        /* 与EventLoop相关联，为EventLoop修改事件监控提供接口 */
+    }
+
+    // 关闭所有事件监控
+    void DisableAll()
+    {
+        _events = 0;
+    }
+
+    // 移除监控
+    void Remove()
+    {
+    }
+
+    // 一旦连接触发了事件就调用这个函数
+    // 决定了触发了什么事件应该调用哪个函数
+    void HandleEvent()
+    {
+        // 可读 || 断开连接 || 优先
+        if ((_revents & EPOLLIN) || (_revents & EPOLLRDHUP) || (_revents & EPOLLPRI))
+        {
+            if (_read_call)
+                _read_call();
+            // 任意回调所有事件监控都得调用
+            // 为了防止活跃度非活跃 则将任意回调用来刷新活跃度
+            if (_event_call)
+                _event_call();
+        }
+
+        // 可写
+        if ((_revents & EPOLLOUT))
+        {
+            if (_write_call)
+                _write_call();
+            // 任意回调所有事件监控都得调用
+            // 为了防止活跃度非活跃 则将任意回调用来刷新活跃度
+            if (_event_call)
+                _event_call();
+        }
+        else if ((_revents & EPOLLERR)) // 出错
+        {
+            // 错误回调调用后连接会断开 因此需要将任意事件回调先调用
+            if (_event_call)
+                _event_call();
+            if (_error_call)
+                _error_call();
+        }
+        else if ((_revents & EPOLLHUP)) // 关闭
+        {
+            // 关闭回调调用后连接会断开 因此需要将任意事件回调先调用
+            if (_event_call)
+                _event_call();
+            if (_close_call)
+                _close_call();
+        }
+    }
+};
+
 #endif
