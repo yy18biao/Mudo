@@ -397,3 +397,34 @@ public:
     void HandleEvent();  
 };
 ```
+
+## Poller模块
+
+对任意描述符进行IO事件监控，也就是对Epoll的封装
+
+**对描述符进行监控，当描述符就绪通过hash表找到对应的Channel对象，获取描述符监控的事件对应的回调函数。**
+
+```cpp
+class Poller
+{
+private:
+    int _epfd; // epoll操作句柄
+    struct epoll_event _evs[]; // epoll_event数组 监控活跃事件
+    std::unordered_map<int, Channel*> _ // hash表管理描述符和Channel对象
+private:
+    // 对epoll直接操作
+    void Update(Channel *channel, int op);
+    // 判断一个Channel是否已经被管理
+    bool IsChannel(Channel *channel);
+    
+public:
+    // 构造函数中创建epoll句柄
+    Poller();
+    
+    // 添加或修改描述符事件监控
+    void Update(Channel* channel);
+    
+    // 移除描述符事件监控
+    void Remove(Channel* channel);
+};
+```
