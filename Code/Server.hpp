@@ -544,8 +544,10 @@ public:
     void UpdateEvent(Channel *channel)
     {
         // 不存在则添加 存在则修改
-        if (!IsChannel(channel))
+        if (!IsChannel(channel)){
+            _channels.insert(std::make_pair(channel->GetFd(), channel));
             Update(channel, EPOLL_CTL_ADD);
+        }
         else
             Update(channel, EPOLL_CTL_MOD);
     }
