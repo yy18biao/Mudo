@@ -38,13 +38,13 @@ void EventCall(Channel* channel)
     std::cout << "EventCall" << std::endl;
 }
 
-void Acceptor(Poller* poller, Channel* channel)
+void Acceptor(EventLoop* loop, Channel* channel)
 {
     int fd = channel->GetFd();
     int newfd = accept(fd, nullptr, nullptr);
     if(newfd < 0) return;
 
-    Channel* chann = new Channel(poller, newfd);
+    Channel* chann = new Channel(loop, newfd);
     chann->SetReadCallBack(std::bind(ReadCall, chann));
     chann->SetWriteCallBack(std::bind(WriteCall, chann));
     chann->SetCloseCallBack(std::bind(CloseCall, chann));
@@ -55,21 +55,16 @@ void Acceptor(Poller* poller, Channel* channel)
 
 int main()
 {
-    Poller poller;
+    EventLoop loop;
     Socket server;
     bool ret = server.CreateServer(8000);
-    Channel channel(&poller, server.GetFd());
+    Channel channel(&loop, server.GetFd());
     // 为新连接添加监控
-    channel.SetReadCallBack(std::bind(Acceptor, &poller, &channel));
+    channel.SetReadCallBack(std::bind(Acceptor, &loop, &channel));
     channel.EnableRead();
     while(1)
     {
-        std::vector<Channel*> channels;
-        poller.Poll(&channels);
-        for(auto& chann : channels)
-        {
-            chann->HandleEvent();
-        }
+        loop.Start();
     }
     server.Close();
 
