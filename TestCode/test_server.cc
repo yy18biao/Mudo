@@ -2,7 +2,7 @@
 
 void CloseCall(Channel* channel)
 {
-    std::cout << "close: " << channel->GetFd() << std::endl;
+    DBG_LOG("close fd : %d", channel->GetFd());
     channel->Remove();
     delete channel;
 }
@@ -15,8 +15,8 @@ void ReadCall(Channel* channel)
     if(ret <= 0)
         return CloseCall(channel);
 
+    DBG_LOG("%s", buff);
     channel->EnableWrite();
-    std::cout << buff << std::endl;
 }
 
 void WriteCall(Channel* channel)
@@ -33,9 +33,9 @@ void ErrorCall(Channel* channel)
     return CloseCall(channel);
 }
 
-void EventCall(Channel* channel)
+void EventCall(EventLoop* loop, Channel* channel, uint64_t timerid)
 {
-    std::cout << "EventCall" << std::endl;
+    loop->TimerRefersh(timerid);
 }
 
 void Acceptor(EventLoop* loop, Channel* channel)
@@ -44,13 +44,17 @@ void Acceptor(EventLoop* loop, Channel* channel)
     int newfd = accept(fd, nullptr, nullptr);
     if(newfd < 0) return;
 
+    uint64_t timerid = rand() % 10000;
     Channel* chann = new Channel(loop, newfd);
     chann->SetReadCallBack(std::bind(ReadCall, chann));
     chann->SetWriteCallBack(std::bind(WriteCall, chann));
     chann->SetCloseCallBack(std::bind(CloseCall, chann));
     chann->SetErrorCallBack(std::bind(ErrorCall, chann));
-    chann->SetEventCallBack(std::bind(EventCall, chann));
+    chann->SetEventCallBack(std::bind(EventCall, loop, chann, timerid));
     chann->EnableRead();
+    // 添加非活跃连接的销毁任务
+    loop->TimerAdd(timerid, 10, std::bind(CloseCall, channel));
+    channel->EnableRead();
 }
 
 int main()
