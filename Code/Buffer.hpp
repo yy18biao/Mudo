@@ -102,6 +102,7 @@ public:
     // 写入数据
     void Write_Data(const void *data, uint64_t len)
     {
+        if(len == 0) return;
         // 保证有足够空间
         Ensure_Write_Space(len);
 
@@ -127,6 +128,7 @@ public:
     // 读取数据
     void Read_Data(void *buff, uint64_t len)
     {
+        if(len == 0) return;
         // 获取的数据大小必须小于可读数据大小
         assert(len <= Get_Read_AbleSize());
 

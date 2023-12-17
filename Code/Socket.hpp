@@ -1,7 +1,7 @@
 #ifndef __M_SOCKET_H__
 #define __M_SOCKET_H__
 
-#include "Buffer.hpp"
+#include "Log.hpp"
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
@@ -113,6 +113,7 @@ public:
 
     ssize_t NonBlockRecv(void *buf, size_t len) // 非阻塞接收数据
     {
+        if(len == 0) return 0;
         return Recv(buf, len, MSG_DONTWAIT);
     }
 
@@ -122,6 +123,8 @@ public:
         ssize_t ret = send(_sockfd, buf, len, flag);
         if (ret < 0)
         {
+            if (errno == EAGAIN || errno == EINTR)
+                return 0;
             ERR_LOG("发送数据出错");
             return -1;
         }
@@ -130,6 +133,7 @@ public:
 
     ssize_t NonBlockSend(const void *buf, size_t len) // 非阻塞发送数据
     {
+        if(len == 0) return 0;
         return Send(buf, len, MSG_DONTWAIT);
     }
 

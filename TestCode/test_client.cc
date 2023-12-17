@@ -6,7 +6,7 @@ int main()
     client.CreateClient(8000, "127.0.0.1");
     for(int i = 0; i < 5; ++i)
     {
-        std::string str = "hello world";
+        std::string str = "你好";
         client.Send(str.c_str(), str.size());
         char buf[1024] = {0};
         client.Recv(buf, 1023);

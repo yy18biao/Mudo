@@ -369,6 +369,9 @@ private:
     
 public:
     Channel();
+    int GetFd();
+    uint32_t GetEvent();
+    
 public:
     void SetREvents(uint32_t events); // 设置当前连接触发的事件
     
@@ -426,5 +429,313 @@ public:
     
     // 移除描述符事件监控
     void Remove(Channel* channel);
+};
+```
+
+## Timer模块
+
+timerfd：实现内核每隔一段时间，给进程一次超时事件
+
+timerwheel：实现每次执行Runtimetask，都可以执行一波到期的定时任务
+
+> 因此要实现一个完整的秒级定时器，就需要将这两个功能整合到一起
+>
+> timerfd设置每秒触发一次定时事件，当事件被出发则运行一次timerwhell的Runtimetask，执行所有的过期定时任务
+>
+> timerfd的事件监控与触发需要融合EventLoop实现
+
+```cpp
+using TaskFunc = std::function<void()>;
+using ReleaseFunc = std::function<void()>;
+class TimerTask // 定时器任务类
+{
+private:
+    uint64_t _id;         // 定时器任务对象ID
+    uint32_t _timeout;    // 定时任务的超时时间
+    bool _canceled;       // 是否要取消任务的标志
+    TaskFunc _task;       // 定时器对象要执行的任务
+    ReleaseFunc _release; // 用于删除TimerWheel中保存的定时器对象信息
+
+public:
+    TimerTask(uint64_t id, uint32_t timeout, const TaskFunc &cb)
+        : _id(id), _timeout(timeout), _task(cb), _canceled(false)
+    {}
+
+    // 对象被销毁时执行任务
+    ~TimerTask()
+    {
+        if (_canceled == false)
+            _task();
+        _release();
+    }
+
+public:
+    void SetRelease(const ReleaseFunc &cb);
+    // 取消任务
+    void Cancel() { _canceled = true; }
+
+    uint32_t GetTimeOut() { return _timeout; }
+};
+
+using TaskPtr = std::shared_ptr<TimerTask>;
+using WeakPtrTask = std::weak_ptr<TimerTask>;
+class EventLoop;
+class TimerWheel
+{
+private:
+    int _tick;     // 当前的秒针
+    int _capacity; // 数组最大容量也就是最大延迟时间
+    std::vector<std::vector<TaskPtr>> _wheel;
+    std::unordered_map<uint64_t, WeakPtrTask> _timers;
+    EventLoop *_loop;
+    int _timerfd; // 定时器描述符
+    std::unique_ptr<Channel> _timer_channel;
+
+private:
+    void RemoveTimer(uint64_t id);
+    // 创建Timer文件描述符
+    static int CreateTimerFd();
+    // 读取定时器
+    void ReadTimerFd();
+    // 执行定时任务
+    void run();
+    // 时间到了之后读取定时器并执行定时任务
+    void OnTime();
+    // 添加定时任务
+    void TimerAddInLoop(uint64_t id, uint32_t delay, const TaskFunc &cb);
+    // 延迟定时任务
+    void TimerRefreshInLoop(uint64_t id);
+    // 取消定时任务
+    void TimerCancelInLoop(uint64_t id);
+
+public:
+    TimerWheel(EventLoop *loop)
+        : _loop(loop), _capacity(60), _tick(0), _wheel(_capacity)
+        , _timerfd(CreateTimerFd()), _timer_channel(new Channel(_loop, _timerfd))
+    {
+        _timer_channel->SetReadCallBack(std::bind(&TimerWheel::OnTime, this));
+        _timer_channel->EnableRead();
+    }
+
+    /*
+        考虑到线程安全则需要用EventLoop去判断
+        如果是该线程的任务则直接执行 否则压入EventLoop的任务池
+        由于使用了EventLoop类的方法
+        所以定义在EventLoop类下 
+    */
+    void TimerAdd(uint64_t id, uint32_t delay, const TaskFunc &cb); // 添加定时任务
+    void TimerRefresh(uint64_t id);                                 // 刷新定时任务
+    void TimerCancel(uint64_t id);                                  // 取消定时任务
+
+    // 判断是否存在某任务
+    // 存在线程安全 因此不能再外部使用
+    // 只能在对应的EventLoop线程内执行
+    bool HasTimer(uint64_t id);
+};
+```
+
+
+
+## EventLoop模块
+
+### eventfd
+
+使用 eventfd 用于**事件通知功能**
+
+```cpp
+#include <sys/eventfd.h>
+int eventfd(unsigned int initval, int flags);
+```
+
+参数 initval：计数初值
+
+参数flags：
+
+> 1. EFD_CLOEXEC - 禁止进程复制
+> 2. EFD_NONBLOCK - 启动非阻塞
+
+返回一个文件描述符用于操作
+
+**eventfd通过read/write/close进行操作，但是read/write进行IO时只能是一个8字节数据**
+
+### EventLoop
+
+与线程一一对应（有多少个线程就有多少个EventLoop对象），进行事件监控以及事件处理
+
+> **为了防止一个连接就绪时在多个线程中都触发了事件，导致线程安全问题，因此需要将一个连接的事件监控以及事件处理都要放在同一个线程中进行**
+>
+> **为了保证所有操作都在同一个线程中，可以给eventloop模块添加一个任务队列，对连接的所有操作都进行一次封装，并不直接执行操作而是将对连接的操作当作任务添加到任务队列中，当所有的就绪事件处理完了，再去将任务队列中的所有任务全部执行。**
+>
+> **最终就只需要给任务队列加一把锁就能保证线程安全**
+>
+> **如果操作本就在线程中，就不需要加入任务队列，直接执行即可**
+
+```cpp
+using Func = std::function<void()>;
+class EventLoop
+{
+private:
+    std::thread::id _thread_id;        // 线程ID
+    int _eventfd;                      // 唤醒IO事件阻塞 事件通知
+    std::unique_ptr<Channel> _channel; // 管理eventfd的事件
+    Poller _poller;                    // 使用Poller事件监控
+    std::vector<Func> _tasks;          // 任务池
+    std::mutex _mutex;                 // 互斥锁
+    TimerWheel _timer_wheel;           // 定时器
+
+private:
+    // 执行任务池中所有任务
+    void RunAllTask();
+    // 创建eventfd
+    static int CreateEventFd();
+    // 读取eventfd
+    void ReadEventFd();
+    // 写入eventfd用于唤醒阻塞线程
+    void WeakUpEventFd();
+
+public:
+    EventLoop()
+        : _thread_id(std::this_thread::get_id()),
+          _eventfd(CreateEventFd()),
+          _channel(new Channel(this, _eventfd)),
+          _timer_wheel(this)
+    {
+        _channel->SetReadCallBack(std::bind(&EventLoop::ReadEventFd, this));
+        _channel->EnableRead();
+    }
+
+    // 将要执行的任务判断，处于当前线程直接执行，不是则添加到任务池
+    void RunInLoop(const Func &cb);
+    // 将任务加入任务池
+    void InsertTaskLoop(const Func &cb);
+    // 判断当前线程是否是EventLoop对应的线程
+    bool IsInLoop();
+    // 添加/修改描述符监控事件
+    void UpdateEvent(Channel *channel);
+    // 移除描述符监控
+    void RemoveEvent(Channel *channel);
+    // EventLoop启动功能
+    void Start();
+    // 添加定时器任务
+    void TimerAdd(uint64_t id, uint32_t delay, const TaskFunc &cb);
+    // 刷新定时器任务
+    void TimerRefersh(uint64_t id);
+    // 取消定时任务
+    void TimerCancel(uint64_t id);
+    // 判断定时任务是否存在
+    bool HasTimer(uint64_t id);
+};
+
+// 由于EventLoop类在Channel类和TimerWheel类之后定义
+// 这两接口又使用到EventLoop类的接口
+// 因此需要拿到EventLoop类之后去定义
+void Channel::Remove() { _eventloop->RemoveEvent(this); }
+void Channel::Update() { _eventloop->UpdateEvent(this); }
+void TimerWheel::TimerAdd(uint64_t id, uint32_t delay, const TaskFunc &cb);
+void TimerWheel::TimerRefresh(uint64_t id);
+void TimerWheel::TimerCancel(uint64_t id);
+```
+
+## Connection模块
+
+对通信连接的整体管理的模块，通信连接的所有操作都是通过这个模块实现的
+
+> 1. 套接字的管理，能够进行套接字的操作
+> 2. 连接事件的管理，可读，可写， 错误，挂断，任意
+> 3. 缓冲区的管理，便于socket数据的接收和发送
+> 4. 协议上下文的管理，记录请求数据的处理过程
+>
+> **为了避免对连接进行操作的时候，连接已经被释放导致内存访问错误，因此需要使用智能指针shared_ptr对Connection对象进行管理。这样可以保证任意一个地方对Connection对象进行操作时就算释放了也不影响Connection的实际释放**
+
+```cpp
+/* 连接的状态 */
+typedef enum
+{
+    DISCONECTED,  // 连接关闭状态
+    CONNECTING,   // 连接建立成功待处理状态
+    CONNECTED,    // 连接建立完成可进行操作状态
+    DISCONNECTING // 连接关闭状态
+} ConnStatu;
+
+using ConnectionPtr = std::shared_ptr<Connection>; // Connection智能指针
+/* 连接的回调函数类型 用户使用设置 */
+using ConnectedCallBack = std::function<void(const ConnectionPtr &)>;
+using MessageCallBack = std::function<void(const ConnectionPtr &, Buffer *)>;
+using CloseCallBack = std::function<void(const ConnectionPtr &)>;
+using AnyEventCallBack = std::function<void(const ConnectionPtr &)>;
+class Connection
+{
+private:
+    uint64_t _conn_id; // 连接的唯一id并且用于定时器的唯一id
+    int _sockfd;       // 连接关联的文件描述符
+    bool _active_sign; // 是否启动非活跃销毁，默认false
+    EventLoop *_loop;  // 连接所关联的loop也就是连接关联在一个线程上
+    ConnStatu _statu;  // 连接的状态
+    Socket _socket;    // 套接字操作管理对象
+    Channel _channel;  // 连接的事件管理对象
+    Buffer _in_buff;   // 输入(读取)缓冲区
+    Buffer _out_buff;  // 输出(发送)缓冲区
+    Any _context;      // 请求接收处理的上下文
+    ConnectedCallBack _conn_callback;
+    MessageCallBack _mess_callback;
+    CloseCallBack _close_callback;
+    AnyEventCallBack _event_callback;
+    /* 由于整个组件的连接都是被管理起来的 因此一旦某个连接需要关闭
+       就需要从管理的地方移除掉 */
+    CloseCallBack _server_close_callback;
+
+private:
+    /* Channel的回调函数 */
+    void HandleRead();  // 读事件触发
+    void HandlWrite();  // 写事件触发
+    void HandleClose(); // 连接断开触发
+    void HandleError(); // 出错触发
+    void HandleEvent(); // 任意事件触发
+
+    // 连接获取后所处的状态下进行各种设置 进行Channel回调设置 启动读事件 设置ConnectedCallBack
+    void SetUpInLoop();
+    // 实际的释放接口在EventLoop线程中实现
+    void CloseInLoop();
+    // 并不是实际的发送接口 只是启动写事件和将数据放入缓冲区
+    void SendInLoop(char *data, size_t len);
+    // 并非实际的连接释放操作，需要判断还有没有数据待处理
+    void ShutDownInLoop();
+    // 实际连接的启动非活跃销毁接口在EventLoop线程中实现
+    void EnableActiveInLoop();
+    // 实际连接的取消非活跃销毁接口在EventLoop线程中实现
+    void CancelActiveInLoop();
+    // 实际连接的切换协议接口在EventLoop线程中实现
+    void UpdateGradeInLoop(const Context &context, const ConnectedCallBack &conn_call, const MessageCallBack &mess_call,
+                           const CloseCallBack &close_call, const AnyEventCallBack &event_call, );
+
+public:
+    Connection(EventLoop *loop, uint64_t conn_id, int socketfd);
+    ~Connection();
+
+    int GetFd();                         // 获取操作的套接字
+    int GetConnId();                     // 获取连接的id
+    bool IsConnected();                  // 判断连接的状态是否处于连接完成状态
+    void SetContext(const Any &context); // 设置上下文 连接建立完成时调用
+    Any *GetContext();                   // 获取上下文
+
+    /* 设置回调函数 */
+    void SetConnectedCall(const ConnectedCallBack &cb);
+    void SetMessageCall(const MessageCallBack &cb);
+    void SetCloseCall(const CloseCallBack &cb);
+    void SetAnyEventCall(const AnyEventCallBack &cb);
+
+    // 供外使用的发送数据接口 实际将数据放到缓冲区并启动写事件监控
+    void Send(char *data, size_t len);
+    // 供外使用的连接获取后所处的状态下进行各种设置 进行Channel回调设置 启动读事件 设置ConnectedCallBack
+    void SetUp();
+    // 供外使用的关闭连接接口 并非真正的关闭
+    void ShutDown();
+    // 启动非活跃销毁
+    void EnableActive();
+    // 取消非活跃销毁
+    void CancelActive();
+    // 协议切换 也就是重置上下文以及阶段性处理函数
+    void UpdateGrade(const Context &context, const ConnectedCallBack &conn_call, const MessageCallBack &mess_call,
+                     const CloseCallBack &close_call, const AnyEventCallBack &event_call, );
 };
 ```

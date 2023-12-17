@@ -7,6 +7,9 @@
 #include <memory>
 #include <thread>
 #include <mutex>
+#include <vector>
+#include <cstring>
+#include <cassert>
 #include <sys/eventfd.h>
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
