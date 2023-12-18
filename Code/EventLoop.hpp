@@ -65,9 +65,9 @@ public:
     // 判断当前是否可写
     bool WritrAble() { return (_events & EPOLLOUT); }
 
-    /* 
+    /*
         由于使用了EventLoop类的方法
-        所以定义在EventLoop类下 
+        所以定义在EventLoop类下
     */
     void Remove(); // 移除监控
     void Update(); // 修改监控
@@ -111,40 +111,25 @@ public:
     // 决定了触发了什么事件应该调用哪个函数
     void HandleEvent()
     {
+        if (_event_call) // 任意
+            _event_call();
         // 可读 || 断开连接 || 优先
         if ((_revents & EPOLLIN) || (_revents & EPOLLRDHUP) || (_revents & EPOLLPRI))
-        {
             if (_read_call)
                 _read_call();
-            // 任意回调所有事件监控都得调用
-            // 为了防止活跃度非活跃 则将任意回调用来刷新活跃度
-            if (_event_call)
-                _event_call();
-        }
 
-        // 可写
-        if ((_revents & EPOLLOUT))
+        if (_revents & EPOLLOUT) // 可写
         {
             if (_write_call)
                 _write_call();
-            // 任意回调所有事件监控都得调用
-            // 为了防止活跃度非活跃 则将任意回调用来刷新活跃度
-            if (_event_call)
-                _event_call();
         }
-        else if ((_revents & EPOLLERR)) // 出错
+        else if (_revents & EPOLLERR) // 出错
         {
-            // 错误回调调用后连接会断开 因此需要将任意事件回调先调用
-            if (_event_call)
-                _event_call();
             if (_error_call)
-                _error_call();
+                _error_call(); // 一旦出错，就会释放连接，因此要放到前边调用任意回调
         }
-        else if ((_revents & EPOLLHUP)) // 关闭
+        else if (_revents & EPOLLHUP) // 断开连接
         {
-            // 关闭回调调用后连接会断开 因此需要将任意事件回调先调用
-            if (_event_call)
-                _event_call();
             if (_close_call)
                 _close_call();
         }
@@ -383,8 +368,7 @@ private:
 
 public:
     TimerWheel(EventLoop *loop)
-        : _loop(loop), _capacity(60), _tick(0), _wheel(_capacity)
-        , _timerfd(CreateTimerFd()), _timer_channel(new Channel(_loop, _timerfd))
+        : _loop(loop), _capacity(60), _tick(0), _wheel(_capacity), _timerfd(CreateTimerFd()), _timer_channel(new Channel(_loop, _timerfd))
     {
         _timer_channel->SetReadCallBack(std::bind(&TimerWheel::OnTime, this));
         _timer_channel->EnableRead();
@@ -394,7 +378,7 @@ public:
         考虑到线程安全则需要用EventLoop去判断
         如果是该线程的任务则直接执行 否则压入EventLoop的任务池
         由于使用了EventLoop类的方法
-        所以定义在EventLoop类下 
+        所以定义在EventLoop类下
     */
     void TimerAdd(uint64_t id, uint32_t delay, const TaskFunc &cb); // 添加定时任务
     void TimerRefresh(uint64_t id);                                 // 刷新定时任务

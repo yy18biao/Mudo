@@ -113,7 +113,8 @@ public:
 
     ssize_t NonBlockRecv(void *buf, size_t len) // 非阻塞接收数据
     {
-        if(len == 0) return 0;
+        if (len == 0)
+            return 0;
         return Recv(buf, len, MSG_DONTWAIT);
     }
 
@@ -133,7 +134,8 @@ public:
 
     ssize_t NonBlockSend(const void *buf, size_t len) // 非阻塞发送数据
     {
-        if(len == 0) return 0;
+        if (len == 0)
+            return 0;
         return Send(buf, len, MSG_DONTWAIT);
     }
 
@@ -165,20 +167,20 @@ public:
         fcntl(_sockfd, F_SETFL, flag | O_NONBLOCK); // 在设置新属性并原属性
     }
 
-    bool CreateServer(uint16_t port, bool block_flag = false) // 创建一个服务端连接
+    bool CreateServer(uint16_t port, const std::string &ip = "0.0.0.0", bool block_flag = false) // 创建一个服务端连接
     {
         // 创建套接字
         if (!Create())
             return false;
+        // 设置非阻塞
+        if (block_flag)
+            NonBlock();
         // 绑定地址
-        if (!Bind("0.0.0.0", port))
+        if (!Bind(ip, port))
             return false;
         // 开始监听
         if (!Listen())
             return false;
-        // 设置非阻塞
-        if (block_flag)
-            NonBlock();
         // 启动地址重用
         ReuseAddress();
 

@@ -1,41 +1,26 @@
 #include "../Code/Server.hpp"
 
-void CloseCall(Channel* channel)
+#include <unordered_map>
+
+std::unordered_map<uint64_t, ConnectionPtr> _conns;
+uint64_t connid = 0;
+void ConnectionDes(const ConnectionPtr &conn)
 {
-    DBG_LOG("close fd : %d", channel->GetFd());
-    channel->Remove();
-    delete channel;
+    _conns.erase(conn->GetConnId());
 }
 
-void ReadCall(Channel* channel)
+void ConnectedCallBack(const ConnectionPtr &conn)
 {
-    int fd = channel->GetFd();
-    char buff[1024] = {0};
-    int ret = recv(fd, buff, 1023, 0);
-    if(ret <= 0)
-        return CloseCall(channel);
-
-    DBG_LOG("%s", buff);
-    channel->EnableWrite();
+    DBG_LOG("创建Connection: %p", conn.get());
 }
 
-void WriteCall(Channel* channel)
+void MessageCallBack(const ConnectionPtr &conn, Buffer* buff)
 {
-    int fd = channel->GetFd();
-    std::string data = "hello world!!";
-    if(send(fd, data.c_str(), strlen(data.c_str()), 0) < 0)
-        return CloseCall(channel);
-    channel->DisableWrite();
-}
-
-void ErrorCall(Channel* channel)
-{
-    return CloseCall(channel);
-}
-
-void EventCall(EventLoop* loop, Channel* channel, uint64_t timerid)
-{
-    loop->TimerRefersh(timerid);
+    DBG_LOG("%s", buff->Get_Read_Start_Pos());
+    buff->Move_Read_Offset(buff->Get_Read_AbleSize());
+    std::string str = "收到 Over";
+    conn->Send(str.c_str(), str.size());
+    conn->ShutDown();
 }
 
 void Acceptor(EventLoop* loop, Channel* channel)
@@ -44,17 +29,14 @@ void Acceptor(EventLoop* loop, Channel* channel)
     int newfd = accept(fd, nullptr, nullptr);
     if(newfd < 0) return;
 
-    uint64_t timerid = rand() % 10000;
-    Channel* chann = new Channel(loop, newfd);
-    chann->SetReadCallBack(std::bind(ReadCall, chann));
-    chann->SetWriteCallBack(std::bind(WriteCall, chann));
-    chann->SetCloseCallBack(std::bind(CloseCall, chann));
-    chann->SetErrorCallBack(std::bind(ErrorCall, chann));
-    chann->SetEventCallBack(std::bind(EventCall, loop, chann, timerid));
-    chann->EnableRead();
-    // 添加非活跃连接的销毁任务
-    loop->TimerAdd(timerid, 10, std::bind(CloseCall, channel));
-    channel->EnableRead();
+    ++connid;
+    ConnectionPtr conn(new Connection(loop, connid, newfd));
+    conn->SetMessageCall(std::bind(MessageCallBack, std::placeholders::_1, std::placeholders::_2));
+    conn->SetConnectedCall(std::bind(ConnectedCallBack, std::placeholders::_1));
+    conn->SetServerCloseCall(std::bind(ConnectionDes, std::placeholders::_1));
+    conn->EnableActive(10);
+    conn->SetUp();
+    _conns.insert(std::make_pair(connid, conn));
 }
 
 int main()

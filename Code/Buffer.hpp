@@ -110,19 +110,6 @@ public:
         const char *d = (const char *)data;
         std::copy(d, d + len, Get_Write_Start_Pos());
         Move_Write_Offset(len);
-        DBG_LOG("写入缓冲区数据成功");
-    }
-
-    // 写入String类型数据
-    void Write_String(const std::string &data)
-    {
-        Write_Data(data.c_str(), data.size());
-    }
-
-    // 写入BUffer类型数据
-    void Write_Buffer(Buffer &data)
-    {
-        Write_Data(data.Get_Read_Start_Pos(), data.Get_Read_AbleSize());
     }
 
     // 读取数据
@@ -131,11 +118,8 @@ public:
         if(len == 0) return;
         // 获取的数据大小必须小于可读数据大小
         assert(len <= Get_Read_AbleSize());
-
         std::copy(Get_Read_Start_Pos(), (char *)Get_Read_Start_Pos() + len, (char *)buff);
-
         Move_Read_Offset(len);
-        DBG_LOG("读取缓冲区数据成功");
     }
 
     // 将读取的数据当作String
@@ -168,7 +152,6 @@ public:
     void Clear_Buff()
     {
         _read_idx = _write_idx = 0;
-        DBG_LOG("清空缓冲区成功");
     }
 };
 
