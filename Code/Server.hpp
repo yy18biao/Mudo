@@ -2,5 +2,6 @@
 #define __M_SERVER_H__
 
 #include "Connection.hpp"
+#include "Acceptor.hpp"
 
 #endif

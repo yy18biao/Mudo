@@ -2,6 +2,7 @@
 
 #include <unordered_map>
 
+EventLoop loop;
 std::unordered_map<uint64_t, ConnectionPtr> _conns;
 uint64_t connid = 0;
 void ConnectionDes(const ConnectionPtr &conn)
@@ -23,14 +24,10 @@ void MessageCallBack(const ConnectionPtr &conn, Buffer* buff)
     conn->ShutDown();
 }
 
-void Acceptor(EventLoop* loop, Channel* channel)
+void Accept(int fd)
 {
-    int fd = channel->GetFd();
-    int newfd = accept(fd, nullptr, nullptr);
-    if(newfd < 0) return;
-
     ++connid;
-    ConnectionPtr conn(new Connection(loop, connid, newfd));
+    ConnectionPtr conn(new Connection(&loop, connid, fd));
     conn->SetMessageCall(std::bind(MessageCallBack, std::placeholders::_1, std::placeholders::_2));
     conn->SetConnectedCall(std::bind(ConnectedCallBack, std::placeholders::_1));
     conn->SetServerCloseCall(std::bind(ConnectionDes, std::placeholders::_1));
@@ -41,18 +38,14 @@ void Acceptor(EventLoop* loop, Channel* channel)
 
 int main()
 {
-    EventLoop loop;
-    Socket server;
-    bool ret = server.CreateServer(8000);
-    Channel channel(&loop, server.GetFd());
+    Acceptor apt(&loop, 8000);
     // 为新连接添加监控
-    channel.SetReadCallBack(std::bind(Acceptor, &loop, &channel));
-    channel.EnableRead();
+    apt.SetAcceptCallBack(std::bind(Accept, std::placeholders::_1));
+    apt.Listen();
     while(1)
     {
         loop.Start();
     }
-    server.Close();
 
     return 0;
 }
