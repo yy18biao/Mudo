@@ -570,6 +570,8 @@ int eventfd(unsigned int initval, int flags);
 >
 > **如果操作本就在线程中，就不需要加入任务队列，直接执行即可**
 
+> EventLoop在实例化对象时必须在线程内部，其thread_id在实例化对象时同步设置，因此需要先创建线程再从线程的入口函数中实例化EventLoop对象
+
 ```cpp
 using Func = std::function<void()>;
 class EventLoop
@@ -788,7 +790,6 @@ public:
     void Listen() { _channel.EnableRead(); } 
 };
 ```
-##
 
 ## LoopThread模块
 
@@ -843,4 +844,53 @@ public:
 };
 ```
 
-### 
+## LoopThreadPool模块
+
+针对LoopThread设计的线程池，便于LoopThread的管理及分配
+
+> 1. 线程数量可配置（0个或多个）
+>    1. 在服务器中，主从Reactor模型的主线程只负责新连接获取，从属线程负责新连接事件监控处理。因此线程池中从属线程可以数量为0
+> 2. 对所有线程进行管理，本质就是管理0个或多个LoopThread对象
+> 3. 提供线程分配的功能，当主线程获取新连接后需要将新连接挂到从属线程
+>    1. 0个从属线程时直接分配给主线程的EventLoop
+>    2. 多个从属线程时采用RR轮转思想进行分配
+
+```cpp
+class LoopThreadPool
+{
+private:
+    int _count;                         // 从属线程数量
+    int _loop_idx;                      // loops的偏移量
+    EventLoop *_loop;                   // 运行在主线程的EventLoop
+    std::vector<LoopThread *> _threads; // 保存所有LoopThread对象
+    std::vector<EventLoop *> _loops;    // 保存所有的EventLoop对象
+
+public:
+    LoopThreadPool(EventLoop *loop) : _count(0), _loop_idx(0), _loop(loop) {}
+    // 设置从属线程数量
+    void SetCount(int count) { _count = count; }
+    // 创建所有的从属线程
+    void Create()
+    {
+        if (_count == 0)
+            return;
+        _threads.resize(_count);
+        _loops.resize(_count);
+        for (int i = 0; i < _count; ++i)
+        {
+            _threads[i] = new LoopThread();
+            _loops[i] = _threads[i]->GetLoop();
+        }
+    }
+    // 获取下一个EventLoop
+    EventLoop *GetNextLoop()
+    {
+        // 如果从属线程数量为0 则只需要返回主线程的EventLoop也就是_loop即可
+        if (_count == 0)
+            return _loop;
+        _loop_idx = (_loop_idx + 1) % _count;
+        return _loops[_loop_idx];
+    }
+};
+```
+
