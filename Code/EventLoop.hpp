@@ -519,16 +519,19 @@ public:
     // EventLoop启动功能
     void Start()
     {
-        // 事件监控
-        std::vector<Channel *> actives;
-        _poller.Poll(&actives);
+        while (1)
+        { 
+            // 事件监控
+            std::vector<Channel *> actives;
+            _poller.Poll(&actives);
 
-        // 事件处理
-        for (auto &channel : actives)
-            channel->HandleEvent();
+            // 事件处理
+            for (auto &channel : actives)
+                channel->HandleEvent();
 
-        // 执行任务
-        RunAllTask();
+            // 执行任务
+            RunAllTask();
+        }
     }
 
     // 添加定时器任务

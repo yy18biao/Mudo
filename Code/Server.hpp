@@ -3,5 +3,6 @@
 
 #include "Connection.hpp"
 #include "Acceptor.hpp"
+#include "LoopThread.hpp"
 
 #endif
