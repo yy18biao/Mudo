@@ -894,3 +894,82 @@ public:
 };
 ```
 
+## TCPServer模块
+
+对上述所有模块进行整合，可以简便的完成服务器的搭建
+
+> **服务器功能：**
+>
+> 1. **设置从属线程池数量**
+> 2. **启动服务器**
+> 3. **设置各种回调函数 连接建立完成回调、消息回调、关闭连接回调、任意事件回调**
+> 4. **是否启动非活跃连接超时销毁**
+> 5. **添加定时任务**
+
+> **服务器工作流程：**
+>
+> 1. **在TCPServer中实例化Acceptor对象和EventLoop对象**
+> 2. **将Acceptor对象挂到EventLoop对象中进行事件监控（监听）**
+> 3. **Acceptor对象就绪后执行回调函数获取新建连接**
+> 4. **对新连接创建Connection中进行管理**
+> 5. **对连接所对应的Connecion设置功能回调**
+> 6. **用户自选是否启动Connection的非活跃连接的超时销毁**
+> 7. **将新连接对应的Connection挂到LoopThreadPool中的从属线程所对应的EventLoop进行事件监控**
+> 8. **Connection触发事件执行对应回调**
+
+```cpp
+class Server
+{
+private:
+    uint64_t _id;                                       // 自增长
+    int _port;                                          // 端口号
+    int _timenum;                                       // 多长时间无通信就是非活跃连接
+    bool _active_sign;                                  // 是否启动非活跃销毁，默认false
+    EventLoop _loop;                                    // 主线程的EventLoop对象，负责监听事件的处理
+    Acceptor _acceptor;                                 // 监听套接字的管理对象
+    std::unordered_map<uint64_t, ConnectionPtr> _conns; // 管理所有Connection的shared_ptr对象
+    LoopThreadPool _loop_pool;                          // 从属EventLoop线程池
+    /* 连接的回调函数类型 用户使用设置 */
+    using ConnectedCallBack = std::function<void(const ConnectionPtr &)>;
+    using MessageCallBack = std::function<void(const ConnectionPtr &, Buffer *)>;
+    using CloseCallBack = std::function<void(const ConnectionPtr &)>;
+    using AnyEventCallBack = std::function<void(const ConnectionPtr &)>;
+    ConnectedCallBack _conn_callback;
+    MessageCallBack _mess_callback;
+    CloseCallBack _close_callback;
+    AnyEventCallBack _event_callback;
+
+private:
+    // 为新连接构造Connection进行管理
+    void CreateConnForNew(int fd);
+    // 从_conns中移除连接信息
+    void RemoveConnInLoop(const ConnectionPtr &conn);
+    // 添加定时任务在对应EventLoop中执行
+    void AddTimedTaskInLoop(const Func &task, int delay);
+
+public:
+    Server(int port) 
+        : _port(port), _id(0), _timenum(0)
+        , _active_sign(false), _acceptor(&_loop, _port)
+        , _loop_pool(&_loop)
+    {
+        _acceptor.SetAcceptCallBack(std::bind(&Server::CreateConnForNew, this, std::placeholders::_1));
+        _acceptor.Listen();
+    }
+
+    // 设置线程池数量
+    void SetThreadPoolCount(int count) { _loop_pool.SetCount(count); }
+    /* 设置回调函数 */
+    void SetConnectedCall(const ConnectedCallBack &cb) { _conn_callback = cb; }
+    void SetMessageCall(const MessageCallBack &cb) { _mess_callback = cb; }
+    void SetCloseCall(const CloseCallBack &cb) { _close_callback = cb; }
+    void SetAnyEventCall(const AnyEventCallBack &cb) { _event_callback = cb; }
+    // 启动非活跃销毁
+    bool EnableActive(int timenum) { _timenum = timenum; _active_sign = true; }
+    // 添加定时任务
+    void AddTimedTask(const Func &task, int delay)
+    { _loop.RunInLoop(std::bind(&Server::AddTimedTaskInLoop, this, task, delay)); }
+    // 启动服务器
+    void Start() { _loop_pool.Create(); _loop.Start(); }
+```
+
