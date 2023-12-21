@@ -1,13 +1,9 @@
-all: client server tcpserver tcpclient
-client:test_client.cc
+all: client server
+client:client.cc
 	g++ -std=c++11 -o $@ $^ -g -std=c++17 -pthread
-server:test_server.cc
-	g++ -std=c++11 -o $@ $^ -g -std=c++17 -pthread
-tcpserver:server.cc
-	g++ -std=c++11 -o $@ $^ -g -std=c++17 -pthread
-tcpclient:client.cc
+server:server.cc
 	g++ -std=c++11 -o $@ $^ -g -std=c++17 -pthread
 	
 .PHONY:
 clean:
-	rm -rf server client tcpserver tcpclient
+	rm -rf server client
