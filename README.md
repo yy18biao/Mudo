@@ -229,6 +229,28 @@ server模块就是对所有的连接以及线程进行管理，让各个线程�
 5. 事件回调函数的设置
    1. 对于连接产生事件该如何处理，也就是一个事件的回调函数是由使用者去设置好传给TcpServer模块，再由TcpServer模块传给各个Connection连接
 
+## Http协议模块
+
+### Util模块
+
+工具模块，主要提供Http协议所用到的一些工具函数，url编解码，文件读写等
+
+### HttpReques模块
+
+Http请求数据模块，同于保存Http请求数据被解析后的各项请求元素信息
+
+### HttpResponse模块
+
+Http响应数据模块，用于业务处理后设置并保存Http响应数据的各项元素信息
+
+### HttpContext模块
+
+Http请求接受的上下文模块，防止在一次接受数据中不是一个完整的Http请求
+
+### HttpServer模块
+
+整合上述模块，实现简单的接口实现Http服务器的搭建
+
 # 实现模块
 
 ## 日志宏编写
@@ -971,5 +993,44 @@ public:
     { _loop.RunInLoop(std::bind(&Server::AddTimedTaskInLoop, this, task, delay)); }
     // 启动服务器
     void Start() { _loop_pool.Create(); _loop.Start(); }
+```
+
+## EchoServer
+
+显示服务器
+
+```cpp
+class EchoServer
+{
+private:
+    Server _server;
+
+private:
+    void OnConnected(const ConnectionPtr &conn)
+    {
+        DBG_LOG("NEW CONNECTION:%p", conn.get());
+    }
+    void OnClosed(const ConnectionPtr &conn)
+    {
+        DBG_LOG("CLOSE CONNECTION:%p", conn.get());
+    }
+    void OnMessage(const ConnectionPtr &conn, Buffer *buf)
+    {
+        DBG_LOG("%s", buf->Get_Read_Start_Pos());
+        conn->Send(buf->Get_Read_Start_Pos(), buf->Get_Read_AbleSize());
+        buf->Move_Read_Offset(buf->Get_Read_AbleSize());
+    }
+
+public:
+    EchoServer(int port) : _server(port)
+    {
+        _server.SetThreadPoolCount(2);
+        _server.SetCloseCall(std::bind(&EchoServer::OnClosed, this, std::placeholders::_1));
+        _server.SetConnectedCall(std::bind(&EchoServer::OnConnected, this, std::placeholders::_1));
+        _server.SetMessageCall(std::bind(&EchoServer::OnMessage, this, std::placeholders::_1, std::placeholders::_2));
+    }
+
+    void Start() { _server.Start(); }
+};
 ```
 
