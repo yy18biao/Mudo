@@ -1034,3 +1034,42 @@ public:
 };
 ```
 
+## HttpUtil模块
+
+实现一些零碎的功能性工具接口
+
+> 1. 读取文件内容
+> 2. 向文件写入内容
+> 3. URL编解码
+> 4. Http状态码和描述信息
+> 5. 根据文件后缀名获取mime
+> 6. 判断文件是目录还是普通文件
+> 7. Http资源路径的有效判断
+
+```cpp
+class Util
+{
+public:
+    // 读取文件内容
+    static bool ReadFile(const std::string &filename, std::string *buf);
+    // 向文件写入数据
+    static bool WriteFile(const std::string &filename, const std::string &buf);
+    // URL编码
+    static std::string UrlEncode(const std::string url, bool convert_space_to_plus);
+    // URL解码
+    static bool UrlDecode(const std::string url, bool convert_plus_to_space);
+    // 响应状态码的描述信息获取
+    static std::string StatuDesc(int statu);
+    // 根据文件后缀名获取mime
+    static std::string GetMime(const std::string &filename);
+    // 判断文件是否为目录
+    static bool IsDir(const std::string &filename);
+    // 判断文件是否为普通文件
+    static bool IsReg(const std::string &filename);
+    // 字符串分割
+    static size_t Split(const std::string &src, const std::string &sep, std::vector<std::string> *arry);
+    // Http请求的资源路径有效性判断
+    static bool ValidPath(const std::string &path);
+};
+```
+
