@@ -1,4 +1,5 @@
 #include "Echo.hpp"
+#include "../Http/Request.hpp"
 
 int main()
 {

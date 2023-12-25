@@ -1073,3 +1073,63 @@ public:
 };
 ```
 
+## HttpRequest模块
+
+存储Http请求信息
+
+> 1. 请求行：请求方法，URL，协议版本
+> 2. 请求头部字段：key: val\r\nkey:val\r\n....
+> 3. 正文：提交给服务器的数据
+
+> 接口：
+>
+> 1. 成员变量设置为公有
+> 2. 提供查询字符串以及头部字段的单个查询获取插入功能
+> 3. 获取正文长度
+> 4. 判断长连接/短连接：Connection：close/keep-alive
+
+```cpp
+class Request
+{
+public:
+    std::string _method;                                   // 请求方法
+    std::string _path;                                     // 资源路径
+    std::string _version;                                  // 协议版本
+    std::string _body;                                     // 请求正文
+    std::unordered_map<std::string, std::string> _headers; // 头部字段
+    std::unordered_map<std::string, std::string> _params;  // 查询字符串
+    std::smatch _matches;                                  // 资源路径的正则提取数据
+
+public:
+    Request() : _version("HTTP/1.1") {}
+    // 重置请求
+    void ReSet()
+    {
+        _method.clear();
+        _path.clear();
+        _version = "HTTP/1.1";
+        _body.clear();
+        std::smatch match;
+        _matches.swap(match);
+        _headers.clear();
+        _params.clear();
+    }
+    // 设置头部字段
+    void SetHeader(std::string &key, std::string &val);
+    // 判断是否有某个头部
+    bool HasHeader(const std::string &key);
+    // 获取头部字段的值
+    std::string GetHeader(const std::string &key);
+    // 插入查询字符串
+    void SetParam(const std::string &key, const std::string &val);
+    // 判断是否有某个指定的查询字符串
+    bool HasParam(const std::string &key) const;
+    // 获取指定的查询字符串
+    std::string GetParam(const std::string &key) const;
+    // 获取正文长度
+    size_t ContentLength() const;
+    // 判断是否是短链接
+    bool Close() const;
+};
+```
+
