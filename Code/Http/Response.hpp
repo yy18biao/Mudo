@@ -13,8 +13,8 @@ public:
     std::unordered_map<std::string, std::string> _headers; // 头部字段
 
 public:
-    HttpResponse() : _redirect_flag(false), _statu(200) {}
-    HttpResponse(int statu) : _redirect_flag(false), _statu(statu) {}
+    Response() : _redirect_flag(false), _statu(200) {}
+    Response(int statu) : _redirect_flag(false), _statu(statu) {}
 
     // 重置响应
     void ReSet()

@@ -245,6 +245,12 @@ Http响应数据模块，用于业务处理后设置并保存Http响应数据的
 
 ### HttpContext模块
 
+记录Http请求的接受和处理进度。
+
+**有可能出现接受的数据并不是一个完整的Http请求数据，也就是请求的处理需要在多次收到数据后才能处理完成，因此在每次处理的时候都需要将处理进度记录起来，以便下次接着当前进度继续处理。**
+
+### HttpContext模块
+
 Http请求接受的上下文模块，防止在一次接受数据中不是一个完整的Http请求
 
 ### HttpServer模块
@@ -1182,6 +1188,51 @@ public:
     void SetRedirect(const std::string &url, int statu = 302);
     // 判断是否是短链接
     bool Close();
+};
+```
+
+### HttpContext模块
+
+```cpp
+typedef enum
+{
+    RECV_ERROR,
+    RECV_LINE,
+    RECV_HEAD,
+    RECV_BODY,
+    RECV_OVER
+} RecvStatu;
+
+#define MAX_LINE 8192
+class Context
+{
+private:
+    int _respStatu;       // 响应状态码
+    RecvStatu _recvStatu; // 当前解析阶段状态
+    Request _request;     // 解析得到的请求信息
+
+private:
+    // 获取请求行
+    bool RecvLine(Buffer *buf);
+    // 解析请求行
+    bool ParseLine(const std::string &line);
+    // 获取请求头部
+    bool RecvHead(Buffer *buf);
+    // 解析请求头部
+    bool ParseHead(std::string &line);
+    // 获取请求正文
+    bool RecvBody(Buffer *buf);
+
+public:
+    Context();
+    // 获取响应状态码
+    int ResponseStatu() { return _respStatu; }
+    // 获取当前解析阶段状态
+    RecvStatu GetRecvStatu() { return _recvStatu; }
+    // 获取请求
+    Request &GetRequest() { return _request; }
+    // 接受并解析请求信息
+    void RecvRequest(Buffer *buf);
 };
 ```
 
