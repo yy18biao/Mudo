@@ -1133,3 +1133,55 @@ public:
 };
 ```
 
+## HttpResponse模块
+
+存储Http响应要素
+
+> 1. 响应状态码
+> 2. 头部字段
+> 3. 响应正文
+> 4. 重定向信息：是否进行了重定向标志/重定向的路径
+
+> 1. 成员变量设置为公有
+> 2. 头部字段的增查获取
+> 3. 正文设置
+> 4. 重定向设置
+> 5. 长短连接判断
+
+```cpp
+class Response
+{
+public:
+    int _statu;                                            // 状态码
+    bool _redirect_flag;                                   // 重定向标志
+    std::string _body;                                     // 响应正文
+    std::string _redirect_url;                             // 重定向路径
+    std::unordered_map<std::string, std::string> _headers; // 头部字段
+
+public:
+    HttpResponse() : _redirect_flag(false), _statu(200) {}
+    HttpResponse(int statu) : _redirect_flag(false), _statu(statu) {}
+    // 重置响应
+    void ReSet()
+    {
+        _statu = 200;
+        _redirect_flag = false;
+        _body.clear();
+        _redirect_url.clear();
+        _headers.clear();
+    }
+    // 插入头部字段
+    void SetHeader(const std::string &key, const std::string &val);
+    // 判断是否存在指定头部字段
+    bool HasHeader(const std::string &key);
+    // 获取指定头部字段的值
+    std::string GetHeader(const std::string &key);
+	// 设置响应内容
+    void SetContent(const std::string &body, const std::string &type = "text/html");
+	// 设置重定向
+    void SetRedirect(const std::string &url, int statu = 302);
+    // 判断是否是短链接
+    bool Close();
+};
+```
+
