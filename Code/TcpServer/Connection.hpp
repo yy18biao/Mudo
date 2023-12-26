@@ -76,7 +76,7 @@ private:
         {
             if (_in_buff.Get_Read_AbleSize() > 0)
                 return _mess_callback(shared_from_this(), &_in_buff);
-            return CloseInLoop();
+            return Release();
         }
 
         // 发送缓冲区没有数据了那就关闭写事件监控
@@ -85,7 +85,7 @@ private:
             _channel.DisableWrite();
             // 如果连接是带关闭状态则发送完数据释放连接
             if (_statu == DISCONNECTING)
-                return CloseInLoop();
+                return Release();
         }
     }
     void HandleClose() // 连接断开触发
@@ -94,7 +94,7 @@ private:
         // 有数据处理就处理完之后就可以关闭连接
         if (_in_buff.Get_Read_AbleSize() > 0)
             return _mess_callback(shared_from_this(), &_in_buff);
-        return CloseInLoop();
+        return Release();
     }
     void HandleError() // 出错触发
     {
@@ -177,7 +177,7 @@ private:
                 _channel.EnableWrite();
         // 没有数据发送直接关闭
         if (_out_buff.Get_Read_AbleSize() == 0)
-            CloseInLoop();
+            Release();
     }
 
     // 实际连接的启动非活跃销毁接口在EventLoop线程中实现
@@ -189,7 +189,7 @@ private:
         if (_loop->HasTimer(_conn_id))
             _loop->TimerRefersh(_conn_id); // 刷新
         else
-            _loop->TimerAdd(_conn_id, sec, std::bind(&Connection::CloseInLoop, this));
+            _loop->TimerAdd(_conn_id, sec, std::bind(&Connection::Release, this));
     }
 
     // 实际连接的取消非活跃销毁接口在EventLoop线程中实现
@@ -251,6 +251,7 @@ public:
         buff.Write_Data(data, len);
         _loop->RunInLoop(std::bind(&Connection::SendInLoop, this, buff));
     }
+    void Release() { _loop->InsertTaskLoop(std::bind(&Connection::CloseInLoop, this)); }
     // 供外使用的关闭连接接口 并非真正的关闭
     void ShutDown() { _loop->RunInLoop(std::bind(&Connection::ShutDownInLoop, this)); }
     // 启动非活跃销毁

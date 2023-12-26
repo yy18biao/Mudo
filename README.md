@@ -758,6 +758,8 @@ public:
     void Send(char *data, size_t len);
     // 供外使用的连接获取后所处的状态下进行各种设置 进行Channel回调设置 启动读事件 设置ConnectedCallBack
     void SetUp();
+    // 供外使用的移除连接接口
+    void Release()
     // 供外使用的关闭连接接口 并非真正的关闭
     void ShutDown();
     // 启动非活跃销毁
@@ -1191,7 +1193,7 @@ public:
 };
 ```
 
-### HttpContext模块
+## HttpContext模块
 
 ```cpp
 typedef enum
@@ -1225,6 +1227,13 @@ private:
 
 public:
     Context();
+    // 重置上下文
+    void ReSet()
+    {
+        _respStatu = 200;
+        _recvStatu = RECV_LINE;
+        _request.ReSet();
+    }
     // 获取响应状态码
     int ResponseStatu() { return _respStatu; }
     // 获取当前解析阶段状态
@@ -1235,4 +1244,298 @@ public:
     void RecvRequest(Buffer *buf);
 };
 ```
+
+## HttpServer模块
+
+```cpp
+using Handler = std::function<void(const Request &, Response *)>;
+using Handlers = std::vector<std::pair<std::regex, Handler>>;
+class HttpServer
+{
+private:
+    /* 各方法的映射处理函数 */
+    Handlers _get_route;
+    Handlers _post_route;
+    Handlers _put_route;
+    Handlers _delete_route;
+    std::string _basedir; // 静态资源根目录
+    Server _server;       // 高性能TCP服务器
+
+private:
+    // 错误处理方法
+    void ErrorHandler(const Request &req, Response *rsp);
+    // 将Response中的要素按照http协议格式进行组织发送
+    void WriteReponse(const ConnectionPtr &conn, const Request &req, Response *rsp);
+    // 判断是否为静态资源
+    bool IsFileHandler(const Request &req);
+    // 静态资源请求处理方法
+    void FileHandler(const Request &req, Response *rsp);
+    // 功能性请求的分类处理
+    void Dispatcher(Request &req, Response *rsp, Handlers &handlers);
+    // 执行对应处理函数进行业务处理
+    void Route(Request &req, Response *rsp);
+    // 设置上下文
+    void OnConnected(const ConnectionPtr &conn)
+    // 缓冲区数据解析处理
+    void OnMessage(const ConnectionPtr &conn, Buffer *buffer);
+
+public:
+    HttpServer();
+    // 设置静态资源根目录
+    void SetBaseDir(const std::string &path);
+    /* 设置各请求方法与处理函数的映射关系 不同的请求方法不同的处理方法*/
+    void Get(const std::string &patten, const Handler& handler);
+    void Post(const std::string &patten, const Handler& handler);
+    void Put(const std::string &patten, const Handler& handler);
+    void Delete(const std::string &patten, const Handler& handler);
+    // 设置线程池中线程数量
+    void SetThreadCount(int count);
+    // 服务器开始工作
+    void Listen();
+
+};
+```
+
+# 服务器功能测试
+
+使用HttpServer搭建出建议的服务器
+
+```cpp
+#include "HttpServer.hpp"
+
+#define WWWROOT "./wwwroot/"
+std::string RequestStr(const Request &req)
+{
+    std::stringstream ss;
+    ss << req._method << " " << req._path << " " << req._version << "\r\n";
+    for (auto &it : req._params)
+        ss << it.first << ": " << it.second << "\r\n";
+    for (auto &it : req._headers)
+        ss << it.first << ": " << it.second << "\r\n";
+    ss << "\r\n";
+    ss << req._body;
+    return ss.str();
+}
+void Hello(const Request &req, Response *rsp)
+{
+    rsp->SetContent(RequestStr(req), "text/plain");
+    // sleep(15);
+}
+void Login(const Request &req, Response *rsp)
+{
+    rsp->SetContent(RequestStr(req), "text/plain");
+}
+void PutFile(const Request &req, Response *rsp)
+{
+    std::string pathname = WWWROOT + req._path;
+    Util::WriteFile(pathname, req._body);
+}
+void DelFile(const Request &req, Response *rsp)
+{
+    rsp->SetContent(RequestStr(req), "text/plain");
+}
+
+int main()
+{
+    HttpServer server(8000);
+    server.SetThreadCount(3);
+    server.SetBaseDir(WWWROOT);
+    server.Get("/hello", Hello);
+    server.Post("/login", Login);
+    server.Put("/1234.txt", PutFile);
+    server.Delete("/1234.txt", DelFile);
+    server.Listen();
+    return 0;
+}
+```
+
+## 浏览器访问服务器
+
+![image-20231226183519617](https://biao22.oss-cn-guangzhou.aliyuncs.com/image-20231226183519617.png)
+
+成功获取浏览器连接并成功响应回指定数据
+
+## 创建一个客户端持续给服务器发送数据
+
+```cpp
+int main()
+{
+    Socket cli_sock;
+    cli_sock.CreateClient(8000, "127.0.0.1");
+    std::string req = "GET /hello HTTP/1.1\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n";
+    while (1)
+    {
+        assert(cli_sock.Send(req.c_str(), req.size()) != -1);
+        char buf[1024] = {0};
+        assert(cli_sock.Recv(buf, 1023));
+        DBG_LOG("[%s]", buf);
+        sleep(3);
+    }
+    cli_sock.Close();
+    return 0;
+}
+```
+
+![image-20231226210315685](https://biao22.oss-cn-guangzhou.aliyuncs.com/image-20231226210315685.png)
+
+成功发送数据并接收到服务器的响应数据
+
+## 只给服务器发送一次数据后，查看服务器是否会正常的超时关闭连接
+
+```cpp
+int main()
+{
+    Socket cli_sock;
+    cli_sock.CreateClient(8000, "127.0.0.1");
+    std::string req = "GET /hello HTTP/1.1\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n";
+    while (1)
+    {
+        assert(cli_sock.Send(req.c_str(), req.size()) != -1);
+        char buf[1024] = {0};
+        assert(cli_sock.Recv(buf, 1023));
+        DBG_LOG("[%s]", buf);
+        sleep(15);
+    }
+    cli_sock.Close();
+    return 0;
+}
+```
+
+![image-20231226210607755](https://biao22.oss-cn-guangzhou.aliyuncs.com/image-20231226210607755.png)
+
+当前超时时间为10秒，成功进行一次通信后服务器执行定时任务成功释放连接
+
+## 告诉服务器要发送1024字节的数据，但是实际发送的数据不足1024
+
+1. 如果数据只发送一次服务器将得不到完整请求，就不会进行业务处理，客户端也就得不到响应，最终超时关闭连接
+2. 连着给服务器发送了多次小的请求，服务器会将后边的请求当作前边请求的正文进行处理，而后便处理的时候有可能就会因为处理错误而关闭连接
+
+```cpp
+int main()
+{
+    Socket cli_sock;
+    cli_sock.CreateClient(8000, "127.0.0.1");
+    std::string req = "GET /hello HTTP/1.1\r\nConnection: keep-alive\r\nContent-Length: 100\r\n\r\nhello world";
+    while (1)
+    {
+        assert(cli_sock.Send(req.c_str(), req.size()) != -1);
+        assert(cli_sock.Send(req.c_str(), req.size()) != -1);
+        assert(cli_sock.Send(req.c_str(), req.size()) != -1);
+        char buf[1024] = {0};
+        assert(cli_sock.Recv(buf, 1023));
+        DBG_LOG("[%s]", buf);
+        sleep(3);
+    }
+    cli_sock.Close();
+    return 0;
+}
+```
+
+![image-20231226210859815](https://biao22.oss-cn-guangzhou.aliyuncs.com/image-20231226210859815.png)
+
+获取成功一次数据后由于之后的数据并不构成一条完整的请求，因此服务器判定出错第二次返回错误信息后断开连接
+
+## 业务处理超时
+
+在一次业务处理中耗费太长时间，导致其他的连接也被连累超时，其他的连接有可能会被拖累超时释放
+
+```cpp
+int main()
+{
+    signal(SIGCHLD, SIG_IGN);
+    for (int i = 0; i < 10; i++)
+    {
+        pid_t pid = fork();
+        if (pid < 0)
+        {
+            DBG_LOG("FORK ERROR");
+            return -1;
+        }
+        else if (pid == 0)
+        {
+            Socket cli_sock;
+            cli_sock.CreateClient(8000, "127.0.0.1");
+            std::string req = "GET /hello HTTP/1.1\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n";
+            while (1)
+            {
+                assert(cli_sock.Send(req.c_str(), req.size()) != -1);
+                char buf[1024] = {0};
+                assert(cli_sock.Recv(buf, 1023));
+                DBG_LOG("[%s]", buf);
+            }
+            cli_sock.Close();
+            exit(0);
+        }
+    }
+    while (1)
+        sleep(1);
+
+    return 0;
+}
+```
+
+此时的测试需要将服务端的业务处理延迟至定时任务执行时间之后，才能测试出超时的样例
+
+```cpp
+void Hello(const Request &req, Response *rsp)
+{
+    rsp->SetContent(RequestStr(req), "text/plain");
+    sleep(15);
+}
+```
+
+测试结果正常，此时的线程池只有3个线程而连接有10个，因此一个线程需要管理多个连接，由于某个业务处理需要15秒才能处理完成，而定时销毁任务仅有10秒，因此就会出现某连接需要等待正在处理业务的连接之后才可以处理，而这段时候又触发了定时销毁任务导致连接断开。
+
+## 一次性给服务器发送多条数据
+
+```cpp
+int main()
+{
+    Socket cli_sock;
+    cli_sock.CreateClient(8000, "127.0.0.1");
+    std::string req = "GET /hello HTTP/1.1\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n";
+    req += "GET /hello HTTP/1.1\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n";
+    req += "GET /hello HTTP/1.1\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n";
+    while (1)
+    {
+        assert(cli_sock.Send(req.c_str(), req.size()) != -1);
+        char buf[1024] = {0};
+        assert(cli_sock.Recv(buf, 1023));
+        DBG_LOG("[%s]", buf);
+        sleep(3);
+    }
+    cli_sock.Close();
+    return 0;
+}
+```
+
+![image-20231226211823296](https://biao22.oss-cn-guangzhou.aliyuncs.com/image-20231226211823296.png)
+
+收发对应正常
+
+## 给服务器上传一个大文件
+
+```cpp
+int main()
+{
+    Socket cli_sock;
+    cli_sock.CreateClient(8000, "127.0.0.1");
+    std::string req = "PUT /1234.txt HTTP/1.1\r\nConnection: keep-alive\r\n";
+    std::string body;
+    Util::ReadFile("./hello.txt", &body);
+    req += "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n";
+    assert(cli_sock.Send(req.c_str(), req.size()) != -1);
+    assert(cli_sock.Send(body.c_str(), body.size()) != -1);
+    char buf[1024] = {0};
+    assert(cli_sock.Recv(buf, 1023));
+    DBG_LOG("[%s]", buf);
+    sleep(3);
+    cli_sock.Close();
+    return 0;
+}
+```
+
+![image-20231226212021707](https://biao22.oss-cn-guangzhou.aliyuncs.com/image-20231226212021707.png)
+
+收发文件md5值一致说明文件内容一样，测试成功
 

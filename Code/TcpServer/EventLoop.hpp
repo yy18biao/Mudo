@@ -304,7 +304,7 @@ private:
     }
 
     // 读取定时器
-    void ReadTimerFd()
+    int ReadTimerFd()
     {
         uint64_t times;
         int ret = read(_timerfd, &times, 8);
@@ -313,6 +313,7 @@ private:
             ERR_LOG("读取定时器失败");
             abort();
         }
+        return times;
     }
 
     // 执行定时任务
@@ -325,8 +326,10 @@ private:
     // 时间到了之后读取定时器并执行定时任务
     void OnTime()
     {
-        ReadTimerFd();
-        run();
+        // 根据实际超时次数执行对应次数的超时任务
+        int times = ReadTimerFd();
+        for(int i = 0; i < times; ++i)
+            run();
     }
 
     // 添加定时任务

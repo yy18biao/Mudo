@@ -102,7 +102,9 @@ private:
     bool ParseHead(std::string &line)
     {
         // 末尾是换行/回车则去掉换行字符
-        if (line.back() == '\n' || line.back() == '\r')
+        if (line.back() == '\n')
+            line.pop_back();
+        if (line.back() == '\r')
             line.pop_back();
         size_t pos = line.find(": ");
         if (pos == std::string::npos)
@@ -193,6 +195,13 @@ private:
 
 public:
     ConText() : _respStatu(200), _recvStatu(RECV_LINE) {}
+    // 重置上下文
+    void ReSet()
+    {
+        _respStatu = 200;
+        _recvStatu = RECV_LINE;
+        _request.ReSet();
+    }
     // 获取响应状态码
     int ResponseStatu() { return _respStatu; }
     // 获取当前解析阶段状态

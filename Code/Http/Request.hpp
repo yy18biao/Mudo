@@ -92,7 +92,7 @@ public:
     // 判断是否是短链接
     bool Close() const
     {
-        if (HasHeader("Connection") == true && GetHeader("Connection") == "keep-alive")
+        if (HasHeader("Connection") && GetHeader("Connection") == "keep-alive")
             return false;
         return true;
     }
