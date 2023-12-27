@@ -1539,3 +1539,30 @@ int main()
 
 收发文件md5值一致说明文件内容一样，测试成功
 
+# 性能压力测试
+
+> **并发量：可以同时处理多少客户端的请求而不会连接失败**
+>
+> **QPS：每秒钟处理包的数量**
+
+借助webbench工具进行测试
+
+## 2核2G带宽3M云服务器(CentOS 7) 1主3从reactor模式
+
+5000并发量下，得到QPS为 **90212 / 60**
+
+![image-20231226225733046](https://biao22.oss-cn-guangzhou.aliyuncs.com/image-20231226225733046.png)
+
+10000并发量下，得到QPS为 **88654 / 60**
+
+![image-20231226225944630](https://biao22.oss-cn-guangzhou.aliyuncs.com/image-20231226225944630.png)
+
+## 4核4G虚拟机(CentOS 7) 1主3从reactor模式
+
+5000并发量下，得到QPS为 **109451/ 60**
+
+![image-20231227191753549](https://biao22.oss-cn-guangzhou.aliyuncs.com/image-20231227191753549.png)
+
+10000并发量下，得到QPS为 **107879/ 60**
+
+![image-20231227191649211](https://biao22.oss-cn-guangzhou.aliyuncs.com/image-20231227191649211.png)

@@ -7,7 +7,7 @@
 #define INF 0
 #define DBG 1
 #define ERR 2
-#define LOG_LEVEL DBG
+#define LOG_LEVEL ERR
 #define LOG(level, format, ...)                                                                                        \
     do                                                                                                                 \
     {                                                                                                                  \

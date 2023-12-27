@@ -70,7 +70,6 @@ private:
         rsp_str << rsp->_body;
 
         // 发送数据
-        DBG_LOG("%s", rsp_str.str().c_str());
         conn->Send(rsp_str.str().c_str(), rsp_str.str().size());
     }
 
